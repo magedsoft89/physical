@@ -1,0 +1,192 @@
+models:
+  Models\Patient:
+    first_name: string
+    last_name: string
+    nick_name: string nullable
+    patient_code: string
+    gender: enum:male,female
+    kids_count: smallInteger unsigned nullable
+    little_kid_old: smallInteger unsigned nullable
+    DOB: date nullable
+    weight: smallInteger nullable
+    height: smallInteger nullable
+    address: string0 nullable
+    phone: string nullable
+    job: string nullable
+    personal_habits: string nullable
+    referring_doctor: string nullable
+    notes: text nullable
+    timestamps: true
+    relationships:
+      hasOne: Problem, PhysicalTherapy
+      hasMany: Visit, XRayImage, LaboratoryTest, NervousSystemTest
+
+
+  Models\Problem:
+    patient_id: id foreign:patients
+    main_complaint: string
+    story: text nullable
+    first_visit_date: date nullable
+    previous_treatments: string nullable
+    response_to_treatment: string nullable
+    medical_history: text nullable
+    surgical_history: text nullable
+    familial_diseases: text nullable
+    associated_diseases: string nullable
+    current_treatments: text nullable
+    pain_kind: string nullable
+    pain_place: string nullable
+    pain_severity: string nullable
+    pain_continuity: string nullable
+    pain_evolution: string nullable
+    pain_time: string nullable
+    associated_complaints: text nullable
+    pain_spread: string nullable
+    resulting_disability: string nullable
+    aggravating_factors: string nullable
+    mitigating_factors: string nullable
+    muscle_weakness_kind: string nullable
+    muscle_weakness_spread: string nullable
+    sense_changing_kind: string nullable
+    sense_changing_spread: string nullable
+    intestinal_function: string nullable
+    bladder_function: string nullable
+    clinical_impression: string nullable
+    notes: text nullable
+    code: string nullable
+    timestamps: true
+    
+  Models\Visit:
+    patient_id: id foreign:patients
+    visit_number: integer unsigned nullable
+    visit_date: date nullable
+    notes: text nullable
+    code: string nullable
+    timestamps: true
+    relationships:
+      hasOne: Prescription, ClinicalSigns
+
+  Models\Prescription:
+    visit_id: id foreign:visits
+    drugs: text nullable
+    timestamps: true
+
+
+  Models\ClinicalSigns:
+    visit_id: id foreign:visits
+    pressure_heigher: smallInteger unsigned nullable
+    pressure_lower: smallInteger unsigned nullable
+    pulse: smallInteger unsigned nullable
+    breathing: smallInteger unsigned nullable
+    temperature: smallInteger unsigned nullable
+    head: string nullable
+    neck: string nullable
+    abdomen: string nullable
+    heart: string nullable
+    urinary_system: string nullable
+    lymphatic_system: string nullable
+    muscular_strength: text nullable
+    muscle_tonic: text nullable
+    joint_fixity: string nullable
+    motion_range: text nullable
+    clinical_test: text nullable
+    timestamps: true
+
+
+  Models\XRayImage:
+    patient_id: id foreign:patients
+    image_date: date
+    kind: string
+    place: string
+    description: text nullable
+    timestamps: true
+    
+  Models\LaboratoryTest:
+    patient_id: id foreign:patients
+    test_date: date
+    leukocyte_count: string nullable
+    neutrophils: string nullable
+    lymphocyte: string nullable
+    eosinophil: string nullable
+    basophil: string nullable
+    monocytes: string nullable
+    erythrocytes: string nullable
+    haemoglobin: string nullable
+    hematocrit: string nullable
+    sugar: string nullable
+    esr_low: string nullable
+    esr_heigh: string nullable
+    urea: string nullable
+    creatine: string nullable
+    alkaline_phosphatase: string nullable
+    phosphorus: string nullable
+    calcium: string nullable
+    triglyceride: string nullable
+    cholesterol: string nullable
+    uric_acid: string nullable
+    wright_test: string nullable
+    widal: string nullable
+    urine_color: string nullable
+    specific_gravity: string nullable
+    urine_ph: string nullable
+    urine_leukocyte: string nullable
+    urine_erythrocytes: string nullable
+    sediment: string nullable
+    oxaluria: string nullable
+    urine_haemoglobin: string nullable
+    germ: string nullable
+    allergy: string nullable
+    others: text nullable
+    timestamps: true
+    
+  Models\NervousSystemTest:
+    patient_id: id foreign:patients
+    test_date: date
+    muscles_reflections: text nullable
+    surface_reflections: text nullable
+    light_touch: string nullable
+    pain: string nullable
+    heat: string  nullable
+    two_points: string nullable
+    sensory_discrimination: string nullable
+    vibration: string nullable
+    postures: string nullable
+    glasgow: string nullable
+    orientation: string nullable
+    attention: string nullable
+    memory: string nullable
+    calculation: string nullable
+    judgment: string nullable
+    food: string nullable
+    clothes: string nullable
+    bathroom: string nullable
+    toilet: string nullable
+    moving: string nullable
+    listening: string nullable
+    reading: string nullable
+    speaking: string nullable
+    writing: string nullable
+    walking_pattern: string nullable
+    meningitics_signs: string nullable
+    cerebellous_signs: string nullable
+    timestamps: true
+    
+  Models\PhysicalTherapy:
+    patient_id: id foreign:patients
+    diagnosis: text nullable
+    treatment_plan: text nullable
+    treatment_start_date: date nullable
+    timestamps: true
+    relationships:
+      hasMany: TreatmentSession
+
+  Models\TreatmentSession:
+    physical_therapy_id: id foreign:physical_therapies
+    session_date: date
+    applied_plan: text
+    code: string nullable
+    notes: text nullable
+    timestamps: true
+
+seeders: Patient, Problem, Visit, Prescription, ClinicalSigns, XRayImage, LaboratoryTest, LaboratoryTest, NervousSystemTest, PhysicalTherapy, TreatmentSession
+
