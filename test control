@@ -1,0 +1,899 @@
+<?php
+class item_controller extends main_controller
+{
+   public static $post_unique_fields_values = array();
+    public static $current_time_field = null;
+    
+    public static $c_processed_item_data = null;
+    
+    public static $to_delete_ids = array();
+    
+    public static $item_process_promise = null;
+    public static $authorized_user = null;
+    
+    public static $current_automation_suppose_timezone = NULL;
+    public static $current_automation_suppose_timezone_4digit_mode = NULL;
+public static function index()
+    {
+        global $url_args;
+        
+        if( parent::index() === false)
+        {
+            return false;
+        }
+        
+        $app = null;
+        $authorized_user = null;
+        
+        if( count( $url_args) >= 3)
+            $app = Application::GetObjectById( ServerInputValidator::cleaning_data( $url_args[1]));
+        
+        if( $app == null)
+        {
+            main_controller::throw_args_request_error('application', DATA_NOT_MATCH);
+            return false;
+        }
+        
+        //$current_user = null;
+        
+        if( main_controller::$is_member_logged_in_bool || main_controller::check_developer_exist_and_authorized_on_app($app))
+        {
+            AWSODBuckets::ready();
+            //ROUTER::register_router('application/{app_id}/item_details/{item_id}', 'item_controller');
+            /*
+            if( main_controller::is_member_logged_in())
+                $current_user = main_controller::get_logged_in_user();
+            elseif( main_controller::$is_developer)
+                $current_user = main_controller::$developer_user;
+            */
+            if( count( $url_args) >= 3)
+            {
+                if( $app != null)
+                {
+                    self::$current_application = $app;
+                    main_controller::call_application_db( $app);
+                    
+                    /* -------------------------- support fields by code and ignore lv container ---------------------------- */
+                    self::rebuild_request_with_container_level($_GET, JSON::$_JSON, $_SERVER['REQUEST_METHOD']);
+                    self::rebuild_request_with_fields_ids( $_GET, JSON::$_JSON, $_SERVER['REQUEST_METHOD']);
+                    /* -------------------------------------------------------------------------------------------------- */
+                    
+                    /* -------------------------- this idea for considering developer key auth case ---------------------------- */
+                    if( main_controller::$is_developer)
+                    {
+                        $authorized_user = main_controller::$developer_user;
+                    }
+                    elseif( main_controller::is_member_logged_in())
+                    {
+                        $authorized_user = main_controller::get_logged_in_user();
+                    }
+                    
+                    item_controller::$authorized_user = $authorized_user;
+                    /* ------------------------------------------------------ */
+                    
+                    if( main_controller::check_user_can_access_application( $authorized_user, $app))
+                    {
+                        if( count( $url_args) == 3)
+                        {
+                            if( $url_args[2] == 'item_data')
+                            {
+                                if( $_SERVER['REQUEST_METHOD'] == GLOBAL_API_REQUEST_TYPE_POST)
+                                {
+                                    self::$is_add_new_item = true;
+                                    
+                                    if( isset( $_GET['model']))
+                                    {
+                                        if(is_numeric($_GET['model']))
+                                            self::$current_screen = Model::GetObjectById( ServerInputValidator::cleaning_data( $_GET['model']));
+                                        else
+                                            self::$current_screen = Model::GetObjectByCode( ServerInputValidator::cleaning_data( $_GET['model']));
+                                        
+                                        if( self::$current_screen != null)
+                                        {
+                                            $required_fields = Field::loadRequiredFields( self::$current_screen);
+                                            self::$required_structures = self::build_required_structures_array( $required_fields);
+                                            
+                                            $owner = main_controller::get_application_owner($app);
+                                            
+                                            if( $owner->usage_limit_exceeded == '0')
+                                            {
+                                                $new_item = self::add_new_item_process();
+
+                                                if( $new_item != null)
+                                                {
+                                                    $field_name_bool = false;
+                                                    $fields_structure_only_bool = false;
+                                                    
+                                                    if( isset( $_GET['field_name']))
+                                                    {
+                                                        if( global_api_helper::parse_bool_value_to_num( @$_GET['field_name']))
+                                                            $field_name_bool = true;
+                                                    }
+                                                    
+                                                    if( isset( $_GET['fields_structure_only']))
+                                                    {
+                                                        if( global_api_helper::parse_bool_value_to_num( @$_GET['fields_structure_only']))
+                                                            $fields_structure_only_bool = true;
+                                                    }
+                                                    
+                                                    main_controller::update_mysql_timezone( main_controller::$current_user_timezone);
+                                                    $res = self::build_full_item_data( $new_item, null, false, $field_name_bool, $fields_structure_only_bool);
+                                                    $res->item_id = $new_item->id;
+                                                    main_controller::$data = $res;
+                                                }
+                                            }
+                                            else
+                                                main_controller::throw_permission_error( null, OWNER_EXCEEDED_LIMIT);
+                                        }
+                                        else
+                                            main_controller::throw_args_request_error( 'model', DATA_NOT_MATCH);
+                                    }
+                                    else
+                                        main_controller::throw_args_request_error( 'model', DATA_NOT_MATCH);
+                                }
+                                
+                                if( $_SERVER['REQUEST_METHOD'] == GLOBAL_API_REQUEST_TYPE_DELETE)
+                                {
+                                    self::$is_delete_item = true;
+                                    self::delete_multi_item_process();
+                                }
+                            }
+                            
+                            if( $url_args[2] == 'item_brief')
+                            {
+                                global $app_db;
+                                
+                                self::set_app_last_access( self::$current_application);
+                                
+                                $screen_id = null;
+                                
+                                if( isset( $_GET['model']))
+                                {
+                                    if(is_numeric($_GET['model']))
+                                        $screen_id = $_GET['model'];
+                                    else
+                                    {
+                                        $model = Model::GetObjectByCode(ServerInputValidator::cleaning_data($_GET['model']));
+                                        
+                                        if( $model != null)
+                                        {
+                                            $screen_id = $model->id;
+                                            $_GET['model'] = $screen_id;
+                                        }
+                                        else
+                                        {
+                                            main_controller::throw_args_request_error('model', DATA_NOT_MATCH);
+                                            return false;
+                                        }
+                                    }
+                                }
+                                
+                                if( (isset( $_GET['group_by']) && !isset( $_GET['having'])) && $screen_id != null)
+                                {
+                                    $g_fields_ids = explode( ',', $_GET['group_by']);
+                                    $g_fields = array();
+                                    $by_containers = array();
+                                    $query_tables = "`item`";
+                                    $query_fields = "";
+                                    $query_group_by = "";
+                                    $query_order_by = "";
+                                    
+                                    foreach( $g_fields_ids as $g_field_id)
+                                    {
+                                        $tmp_field = Field::GetObjectById( ServerInputValidator::cleaning_data( $g_field_id));
+                                        
+                                        if( $tmp_field != null)
+                                        {
+                                            if( $tmp_field->model == $screen_id)
+                                            {
+                                                $container = Container::GetObjectById( $tmp_field->container);
+                                                
+                                                if( $container->type == CONTAINER_TYPE_FIELD_LIST)
+                                                {
+                                                    $tmp_field->con_obj = $container;
+                                                    $g_fields[] = $tmp_field;
+                                                    
+                                                    if( !isset($by_containers[$container->id]))
+                                                        $by_containers[$container->id] = array();
+                                                    
+                                                    $by_containers[$container->id][] = $tmp_field;
+                                                }
+                                                else
+                                                    main_controller::throw_args_request_error ('group by field->container ('.$g_field_id.')', DATA_NOT_MATCH);
+                                            }
+                                            else
+                                                main_controller::throw_args_request_error ('group by field->model ('.$g_field_id.')', DATA_NOT_MATCH);
+                                        }
+                                        
+                                        if( count( $g_fields) == 2)
+                                            break;
+                                    }
+                                    
+                                    $g_counter = 0;
+                                    
+                                    foreach( $by_containers as $con_id => $g_con_fields)
+                                    {
+                                        $tmp_con = $g_con_fields[0]->con_obj;
+                                        $table_name = '`container_'.$tmp_con->model.'_'.$tmp_con->parent_container.'_'.$tmp_con->id.'`';
+                                        
+                                        $query_tables .= " left join $table_name on (`item`.`id` = $table_name.`item_id`)";
+                                        
+                                        foreach( $g_con_fields as $g_con_field)
+                                        {
+                                            $query_fields .= ', `field_'.$g_con_field->id.'`';
+                                            $query_group_by .= ', `field_'.$g_con_field->id.'`';
+                                            $query_order_by .= ', `field_'.$g_con_field->id.'` ASC';
+                                        }
+                                        
+                                        $g_counter ++;
+                                    }
+                                    
+                                    $query_fields = substr( $query_fields, 1);
+                                    $query_group_by = substr( $query_group_by, 1);
+                                    $query_order_by = substr( $query_order_by, 1);
+                                    
+                                    $perm_conds = main_controller::check_item_permission( '`id`', '`item`', 0, true);
+                                    
+                                    if(strlen( $perm_conds) > 0)
+                                        $perm_conds = " and ($perm_conds)";
+                                    
+                                    $group_by_query = "select $query_fields, count(`item`.`id`) cnt from $query_tables where `model` = '$screen_id' $perm_conds group by $query_group_by order by $query_order_by";
+                                    //echo $group_by_query;
+                                    $query = new DbQuery();
+                                    $query->query_type = QUERY_SELECT;
+                                    $query->query_string = $group_by_query;
+                                    $app_db->query = $query;
+                                    
+                                    $result = array();
+                                    
+                                    if( $app_db->ExecuteQuery())
+                                    {
+                                        $rows = $app_db->query->select_result;
+                                        $by_values = array();
+                                        
+                                        foreach( $rows as $row)
+                                        {
+                                            $obj_index = null;
+                                            
+                                            foreach( $g_fields as $g_field_index => $g_field)
+                                            {
+                                                if( $g_field_index == 0)
+                                                {
+                                                    if( !isset( $by_values[$row->{'field_'.$g_field->id}]))
+                                                    {
+                                                        $obj_index = count($result);
+                                                        $by_values[$row->{'field_'.$g_field->id}] = $obj_index;
+                                                        $result[$obj_index] = new stdClass();
+                                                        $result[$obj_index]->direct_childs_count = 0;
+                                                        $result[$obj_index]->grouped_value = item_controller::build_item_display_field_value( $row->{'field_'.$g_field->id}, $g_field);
+                                                        
+                                                        if( count( $g_fields) == 1)
+                                                            $result[$obj_index]->grand_childs_count = $row->cnt;
+                                                        else
+                                                            $result[$obj_index]->grand_childs_count = 0;
+                                                        
+                                                        $result[$obj_index]->direct_childs = array();
+                                                        $result[$obj_index]->raw = $row->{'field_'.$g_field->id};
+                                                    }
+                                                    else
+                                                        $obj_index = $by_values[$row->{'field_'.$g_field->id}];
+                                                }
+                                                else
+                                                {
+                                                    $tmp_child_obj = new stdClass();
+                                                    
+                                                    $tmp_child_obj->childs_count = $row->cnt;
+                                                    $tmp_child_obj->grouped_value = item_controller::build_item_display_field_value( $row->{'field_'.$g_field->id}, $g_field);
+                                                    $tmp_child_obj->raw = $row->{'field_'.$g_field->id};
+                                                    
+                                                    $result[$obj_index]->direct_childs[] = $tmp_child_obj;
+                                                    $result[$obj_index]->grand_childs_count += $row->cnt;
+                                                    $result[$obj_index]->direct_childs_count ++;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    main_controller::$data['data'] = $result;
+                                }
+                                else
+                                {
+                                    $conds = array();
+                                    /*
+                                    if( $screen_id != null)
+                                        $conds[] = new QueryCondition('model', $screen_id);
+                                    */
+                                    $status = global_api_helper::get_api_conditions_array( 'Item', $conds);
+                                    
+                                    global_api_helper::set_is_active_global_api( 'Item', $conds);
+                                    
+                                    $limit = NULL;
+                                    global_api_helper::get_api_limit_object( $limit);
+                                    
+                                    $item_data_orders = array();
+                                    $item_data_selects = array();
+                                    
+                                    if( $screen_id != null)
+                                    {
+                                        if( isset( $_GET[ITEM_DATA_API_ORDER_KEYWORD]))
+                                        {
+                                            if( is_array( $_GET[ITEM_DATA_API_ORDER_KEYWORD]))
+                                            {
+                                                self::get_api_item_data_orders_array( $screen_id, $item_data_orders, $item_data_selects);
+                                            }
+                                        }
+                                    }
+                                    
+                                    $translate_original = false;
+                                    $language = null;
+                                    
+                                    ////////////// translation returned with orginial field key
+                                    if( isset( $_GET['translate_original']))
+                                    {
+                                        if( global_api_helper::parse_bool_value_to_num( @$_GET['translate_original']))
+                                            $translate_original = true;
+                                    }
+
+                                    if( isset( $_GET['language']))
+                                    {
+                                        if( $_GET['language'])
+                                        {
+                                            $language = Language::GetObjectByCode( ServerInputValidator::cleaning_data( $_GET['language']));
+                                        }
+                                    }
+                                    
+                                    $orders = array();
+                                    
+                                    //if( count($item_data_orders) == 0)
+                                    {
+                                        global_api_helper::get_api_orders_array( 'Item', $orders);
+                                    }
+                                    
+                                    $fields = array();
+                                    $fields[] = '*';
+                                    
+                                    foreach( $item_data_selects as $item_data_select)
+                                    {
+                                        $fields[] = $item_data_select->value;
+                                    }
+                                    
+                                    $orders = array_merge( $item_data_orders, $orders);
+                                    
+                                    main_controller::check_item_permission( '`id`', '`item`', 0, false, $conds);
+                                    //var_dump($conds);
+                                    
+                                    if( isset( $_GET[GLOBAL_API_TOTAL_COUNT_KEYWORD]))
+                                    {
+                                        QueryBuilderInstance::$total_objects_enabled = true;
+                                    }
+                                    
+                                    /* ------------------------------------- */
+                                    $dis_timezone = main_controller::$current_user_timezone;
+                                    
+                                    if( isset( $_GET['timezone']))
+                                        $dis_timezone = $_GET['timezone'];
+                                    
+                                    main_controller::update_mysql_timezone( $dis_timezone);
+                                    /* ------------------------------------- */
+                                    
+                                    //QueryBuilderInstance::$debug = true;
+                                    //var_dump($fields);
+                                    //main_controller::$api_data['order'] = $orders;
+                                    $items = Item::GetAllObjects( $fields, $conds, $orders, $limit);
+                                    $res = array();
+                                    
+                                    //$d_fields = Field::GetDisplayedFields( $screen_id);
+                                    //$items_fields_values = Item::GetItemsFieldsValuesConList( $items, $d_fields, true);
+
+                                    $non_display_fields = array();
+                                    
+                                    if( isset( $_GET['item_data_fields']) && isset( $_GET['model']) && $screen_id != null)
+                                    {
+                                        $model = Model::GetObjectById($screen_id);
+
+                                        if( $model != null)
+                                        {
+                                            $fields_str =  $_GET['item_data_fields'];
+                                            $fields_ids = explode( ',', $fields_str);
+
+                                            foreach( $fields_ids as $field_id)
+                                            {
+                                                $field_id_safe = ServerInputValidator::cleaning_data( $field_id);
+                                                $tmp_non_dis_field = Field::GetObjectById( $field_id_safe);
+
+                                                if( $tmp_non_dis_field != null)
+                                                {
+                                                    if( $tmp_non_dis_field->model == $screen_id)
+                                                    {
+                                                        $non_display_fields[] = $tmp_non_dis_field;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    $d_fields = null;
+                                    
+                                    if( $screen_id != null)
+                                    {
+                                        if( count( $non_display_fields) > 0)
+                                            $d_fields = $non_display_fields;
+                                        else
+                                            $d_fields = main_controller::call_fun_with_cache( 'Field::GetDisplayedFields', array( $screen_id));
+                                        
+                                        //$d_fields = main_controller::call_fun_with_cache( 'item_controller::replace_translated_fields', array( $d_fields));
+                                        
+                                        if( !$translate_original && $language == null)
+                                        {
+                                            $d_fields = main_controller::call_fun_with_cache( 'item_controller::replace_translated_fields', array( $d_fields));
+                                        }
+                                        else
+                                        {
+                                            $d_fields = main_controller::call_fun_with_cache( 'item_controller::add_all_translated_field_from_coll', array( $d_fields));
+                                        }
+                                    }
+                                    
+                                    $field_name_bool = false;
+                                    
+                                    if( isset( $_GET['field_name']))
+                                    {
+                                        if( global_api_helper::parse_bool_value_to_num( @$_GET['field_name']))
+                                            $field_name_bool = true;
+                                    }
+                                    
+                                    //cache all item data rows to performance
+                                    $rows = self::get_items_data_containers_rows($items, $language, $d_fields);
+                                    $cache = array();
+                                    
+                                    //main_controller::$api_data['meta']['items_time'] = array();
+                                    
+                                    foreach( $items as $item)
+                                    {
+                                        //$start = microtime(true);
+                                        
+                                        if( $screen_id == null)
+                                        {
+                                            if( count( $non_display_fields) > 0)
+                                                $d_fields = $non_display_fields;
+                                            else
+                                                $d_fields = main_controller::call_fun_with_cache( 'Field::GetDisplayedFields', array( $item->model));
+                                            
+                                            if( !$translate_original && $language == null)
+                                                $d_fields = main_controller::call_fun_with_cache( 'item_controller::replace_translated_fields', array( $d_fields));
+                                            else
+                                            {
+                                                $d_fields = main_controller::call_fun_with_cache( 'item_controller::add_all_translated_field_from_coll', array( $d_fields));
+                                            }
+                                        }
+                                        
+                                        if( $field_name_bool)
+                                        {
+                                            $tmp_data = item_controller::build_item_display_fields_object( $item, $d_fields, $rows[$item->id], false, item_controller::$authorized_user, $field_name_bool, $translate_original, $language);
+                                        }
+                                        elseif( isset($_GET['item_name_fields']) && @$_GET['item_name_fields'])
+                                            $tmp_data = item_controller::build_item_string_part_object( $item);
+                                        else
+                                            $tmp_data = item_controller::build_item_display_fields_object( $item, $d_fields, $rows[$item->id], false, item_controller::$authorized_user, $field_name_bool, $translate_original, $language);
+                                        
+                                        if( isset( $_GET['system_fields']) || ($screen_id != null && isset( $_GET['export_to_excel'])))
+                                        {
+                                            if( @$_GET['system_fields'] || ($screen_id != null && isset( $_GET['export_to_excel'])))
+                                            {
+                                                item_controller::set_system_fields_in_item($tmp_data->{$item->id}, $item, $cache);
+                                                //$item_for_process = clone $item;
+                                                /*$item_for_process = new Item();
+                                                
+                                                if( !isset( $cache[$item->created_by]))
+                                                    $item_for_process->created_by = $item->created_by;
+                                                
+                                                $item_for_process->creation_date = $item->creation_date;
+                                                $item_for_process->sort = $item->sort;
+                                                $item_for_process->ConvertToProcessedData( 1, null);
+                                                
+                                                //$tmp_data->{$item->id}->created_by = $item_for_process->user;
+                                                if( !isset( $cache[$item->created_by]))
+                                                    $tmp_data->{$item->id}->created_by = $item_for_process->created_by;
+                                                else
+                                                    $tmp_data->{$item->id}->created_by = $cache[$item->created_by];
+                                                
+                                                $tmp_data->{$item->id}->creation_date = $item_for_process->creation_date;
+                                                $tmp_data->{$item->id}->sort = $item_for_process->sort;
+                                                
+                                                if( !isset( $cache[$item->created_by]))
+                                                    $cache[$item->created_by] = $item_for_process->created_by;*/
+                                            }
+                                        }
+
+                                        $res[] = $tmp_data;
+                                        
+                                        /*
+                                        $end = microtime(true);
+                                        $diff = $end - $start;
+                                        main_controller::$api_data['meta']['items_time']['time_'.$item->id] = $diff;*/
+                                    }
+                                    
+                                    if( $screen_id != null && isset( $_GET['export_to_excel']))
+                                    {
+                                        if( $_GET['export_to_excel'] == '1')
+                                        {
+                                            $file = ExportExcel::export_item_data_to_excel( $res, $d_fields);
+                                            $file_url = self::get_excel_url($file);
+                                            //$file_url = ROUTER::url($file);
+                                            
+                                            if( isset($_GET[GLOBAL_API_ALL_POSSIBLE_RESULT]))
+                                            {
+                                                $bool = global_api_helper::parse_num_value_to_bool( $_GET[GLOBAL_API_ALL_POSSIBLE_RESULT]);
+                                                
+                                                if( $bool)
+                                                {
+                                                    self::send_export_excel_email(main_controller::get_logged_in_user(), $file_url);
+                                                }
+                                            }
+                                            
+                                            main_controller::$data = $file_url;
+                                            return true;
+                                        }
+                                    }
+                                    
+                                    $schema = false;
+                                    
+                                    if( isset( $_GET[ITEM_DATA_SCHEMA_KEYWORD]))
+                                        $schema = $_GET[ITEM_DATA_SCHEMA_KEYWORD];
+                                    
+                                    if( $schema && $screen_id != null)
+                                    {
+                                        /*
+                                        if( count( $non_display_fields) > 0)
+                                            $fields = $non_display_fields;
+                                        else
+                                            $fields = main_controller::call_fun_with_cache( 'Field::GetDisplayedFields', array( $screen_id));
+                                        */
+                                        $fields = $d_fields;
+                                        //$fields = Field::GetDisplayedFields( $screen_id);
+                                        ODBaseObject::ConvertODBaseObjectCollectionToProcessedData( $fields, 1, null);
+                                        main_controller::$data['schema'] = $fields;
+                                    }
+                                    
+                                    /*
+                                    echo "---------------- schema ----------------<br>";
+                                    print_r($fields);
+                                    echo "---------------- end schema ----------------<br>";
+                                    */
+                                    
+                                    //main_controller::$data['data'] = $res;
+                                    
+                                    main_controller::$api_data['meta']['items_count'] = count( $items);
+                                    main_controller::$data['data'] = $res;
+                                }
+                            }
+                        }
+                        elseif( end($url_args) == 'calendar')
+                        {
+                            if( self::validate_item_data_calendar())
+                            {
+                                global $app_db;
+                                /*@var $container Container*/
+                                /*@var $app_db DatabaseConnection */
+                                $model = Model::GetObjectById( self::$current_field->model);
+                                $container = Container::GetObjectById( self::$current_field->container);
+                                $tab_id = $container->parent_container;
+                                $table_name = 'container_'.$model->id.'_'.$tab_id.'_'.$container->id;
+                                $column_name = 'field_'.self::$current_field->id;
+                                
+                                $start_date = ServerInputValidator::cleaning_data( $_GET['start_date']);
+                                $end_date = ServerInputValidator::cleaning_data( $_GET['end_date']);
+                                
+                                $query = "select `item_id`, `$column_name` from `$table_name` where `$column_name` between '$start_date' and '$end_date'";
+                                
+                                $item_permission_sub_query = main_controller::check_item_permission('`item_id`', "`$table_name`", 0, true);
+        
+                                if( strlen( $item_permission_sub_query) > 0)
+                                    $query .= " and ($item_permission_sub_query)";
+                                
+                                $app_db->db_obj->set_query( $query);
+                                $res = $app_db->db_obj->select();
+                                
+                                $d_fields = main_controller::call_fun_with_cache( 'Field::GetDisplayedFields', array( $model->id));
+                                
+                                $return = new stdClass();
+                                
+                                foreach( $res as $row)
+                                {
+                                    if( !isset( $return->{$row[$column_name]}))
+                                    {
+                                        if( isset( $_GET['time_field']))
+                                            $return->{$row[$column_name]} = new stdClass();
+                                        else
+                                            $return->{$row[$column_name]} = array();
+                                    }
+                                    
+                                    $item = Item::GetObjectById($row['item_id']);
+                                    
+                                    $brief = item_controller::build_item_display_fields_object( $item, $d_fields);
+                                    
+                                    if( isset( $_GET['time_field']))
+                                    {
+                                        $time_val = Item::GetItemFieldValue( $item, self::$current_time_field);
+                                        
+                                        if( $time_val == null || $time_val == '')
+                                        {
+                                            if( !isset( $return->{$row[$column_name]}->null))
+                                                $return->{$row[$column_name]}->null = array();
+                                            
+                                            $return->{$row[$column_name]}->null[] = $brief;
+                                        }
+                                        else
+                                        {
+                                            $expl = explode(':', $time_val);
+                                            $hour = $expl[0];
+                                            
+                                            if( !isset( $return->{$row[$column_name]}->$hour))
+                                                $return->{$row[$column_name]}->$hour = array();
+                                            
+                                            $brief->{$item->id}->time = $expl[0].':'.$expl[1];
+                                            $return->{$row[$column_name]}->$hour[] = $brief;
+                                        }
+                                    }
+                                    else
+                                        $return->{$row[$column_name]}[] = $brief;
+                                }
+                                
+                                main_controller::$data = $return;
+                            }
+                        }
+                        else
+                        {
+                            $item_id = $url_args[3];
+                            
+                            if( !main_controller::check_item_permission('`id`', '`item`', $item_id))
+                            {
+                                main_controller::throw_permission_error( null, PERMISSION_ERROR);
+                                return false;
+                            }
+                            
+                            $item = Item::GetObjectById($item_id);
+                            
+                            if( $item != null)
+                            {
+                                self::$current_item = $item;
+                                
+                                if( end($url_args) == 'item_references')
+                                {
+                                    if( $_SERVER['REQUEST_METHOD'] == GLOBAL_API_REQUEST_TYPE_GET)
+                                    {
+                                        $model = Model::GetObjectById( $item->model);
+                                        
+                                        $conds = array();
+                                        $conds[] = new QueryCondition( 'model', $model->id);
+                                        
+                                        $relations = RelatedFieldRelation::GetAllObjects( array(), $conds);
+                                        main_controller::$data = array();
+                                        
+                                        foreach( $relations as $relation)
+                                        {
+                                            $res = self::get_item_references_by_relation( $item, $relation);
+                                            
+                                            $target_field = Field::GetObjectById( $relation->field);
+                                            $target_screen = Model::GetObjectById( $target_field->model);
+                                            
+                                            $target_field->ConvertToProcessedData( 1, null);
+                                            
+                                            $return = new stdClass();
+                                            $return->model = $target_screen;
+                                            $return->field = $target_field;
+                                            $return->items = $res;
+                                            $return->relation_id = $relation->id;
+                                            
+                                            main_controller::$data[] = $return;
+                                        }
+                                        
+                                        main_controller::throw_process_done_msg();
+                                        
+                                        //main_controller::$api_data['meta']['items_count'] = count( $res);
+                                        //QueryBuilderInstance::$total_items_count = $cnt;
+                                        //main_controller::$data = $res;
+                                        
+                                        /*
+                                        $relation_id = $_GET['relation'];
+                                        
+                                        $relation = RelatedFieldRelation::GetObjectById( $relation_id);
+                                        
+                                        if( $relation != null)
+                                        {
+                                            $target_field = Field::GetObjectById( $relation->field);
+                                            $target_screen = Model::GetObjectById( $target_field->model);
+                                            $word = '';
+                                            
+                                            if( isset( $_GET['keyword']))
+                                                $word = ServerInputValidator::cleaning_data( $_GET['keyword']);
+                                            
+                                            $limit = NULL;
+                                            global_api_helper::get_api_limit_object( $limit);
+                                            
+                                            $items_and_tools = Item::loadRelatedItemsMenuPage( $target_screen, $target_field, $limit, $word, $item);
+                                            
+                                            if( count( $items_and_tools) > 0)
+                                            {
+                                                $rows = $items_and_tools[0];
+                                                $cnt = $items_and_tools[1];
+                                                
+                                                $res = array();
+                                                $objects = array();
+
+                                                foreach( $rows as $row)
+                                                {
+                                                    $objects[] = Item::GetObjectById( $row->item_id);
+                                                }
+
+                                                if( count( $objects) > 0)
+                                                {
+                                                    foreach( $objects as $item)
+                                                    {
+                                                        $res[] = item_controller::build_item_display_fields_object( $item);
+                                                    }
+                                                }
+                                                
+                                                main_controller::$api_data['meta']['items_count'] = count( $res);
+                                                QueryBuilderInstance::$total_items_count = $cnt;
+                                                main_controller::$data = $res;
+                                            }
+                                            else
+                                                main_controller::throw_unknown_error();
+                                        }
+                                        else
+                                            main_controller::throw_args_request_error ('relation', REQUIRED_FIELD);
+                                        */
+                                    }
+                                }
+                                elseif( $url_args[2] == 'shared_item_link')
+                                {
+                                    if( $_SERVER['REQUEST_METHOD'] == GLOBAL_API_REQUEST_TYPE_GET)
+                                    {
+                                        if( $item->share_code == null || $item->share_code == '')
+                                        {
+                                            
+                                        }
+                                    }
+                                }
+                                elseif( $url_args[2] == 'item_data')
+                                {
+                                    if( $_SERVER['REQUEST_METHOD'] == GLOBAL_API_REQUEST_TYPE_GET)
+                                    {
+                                        $dis_timezone = main_controller::$current_user_timezone;
+                                        
+                                        if( isset( $_GET['timezone']))
+                                            $dis_timezone = $_GET['timezone'];
+                                        
+                                        if( end( $url_args) == 'item_name')
+                                        {
+                                            main_controller::update_mysql_timezone( $dis_timezone);
+                                            $res = self::build_item_string_part( $item);
+                                            main_controller::$data = $res;
+                                        }
+                                        else
+                                        {
+                                            if( isset( $_GET['field']))
+                                            {
+                                                if( item_controller::validate_item_data_single_field())
+                                                {
+                                                    main_controller::$is_item_data = true;
+                                                    main_controller::update_mysql_timezone( $dis_timezone);
+                                                    
+                                                    $field_value = Item::GetItemFieldValue( $item, self::$current_field);
+                                                    
+                                                    $res = item_controller::build_item_field_value_object( self::$current_field, null, $field_value);
+                                                    main_controller::$data = $res;
+                                                }
+                                            }
+                                            else
+                                            {
+                                                //field_name=true&fields_structure_only=true
+                                                $depth = 1;
+                                                $field_name_bool = false;
+                                                $translate_original = false;
+                                                $language = null;
+                                                $related_grid_meta_data = false;
+                                                
+                                                if( isset( $_GET['field_name']))
+                                                {
+                                                    if( global_api_helper::parse_bool_value_to_num( @$_GET['field_name']))
+                                                        $field_name_bool = true;
+                                                }
+                                                
+                                                if( isset( $_GET['translate_original']))
+                                                {
+                                                    if( global_api_helper::parse_bool_value_to_num( @$_GET['translate_original']))
+                                                        $translate_original = true;
+                                                }
+                                                
+                                                if( isset( $_GET['language']))
+                                                {
+                                                    if( $_GET['language'])
+                                                    {
+                                                        $language = Language::GetObjectByCode( ServerInputValidator::cleaning_data( $_GET['language']));
+                                                    }
+                                                }
+                                                
+                                                if( @(isset( $_GET['related_grid_meta_data']) && $_GET['related_grid_meta_data']))
+                                                    $related_grid_meta_data = true;
+                                                
+                                                if( isset( $_GET['depth']))
+                                                    $depth = $_GET['depth'];
+                                                
+                                                $fields_structure_only_bool = false;
+                                                
+                                                if( isset( $_GET['fields_structure_only']))
+                                                {
+                                                    if( global_api_helper::parse_bool_value_to_num( @$_GET['fields_structure_only']))
+                                                        $fields_structure_only_bool = true;
+                                                }
+                                                
+                                                main_controller::$is_item_data = true;
+                                                main_controller::update_mysql_timezone( $dis_timezone);
+                                                $res = self::build_full_item_data( $item, item_controller::$authorized_user, false, $field_name_bool, $fields_structure_only_bool, $depth, $translate_original, $language, $related_grid_meta_data);
+                                                main_controller::$data = $res;
+                                            }
+                                        }
+                                    }
+                                    
+                                    if( $_SERVER['REQUEST_METHOD'] == GLOBAL_API_REQUEST_TYPE_PUT)
+                                    {
+                                        self::$is_edit_item = true;
+                                        self::$current_screen = Model::GetObjectById( $item->model);
+                                        self::$current_item_id = $item_id;
+                                        self::$current_item = $item;
+                                        
+                                        $required_fields = Field::loadRequiredFields( self::$current_screen);
+                                        self::$required_structures = self::build_required_structures_array( $required_fields);
+
+                                        self::edit_item_process();
+                                        
+                                        main_controller::update_mysql_timezone( main_controller::$current_user_timezone);
+                                        $res = self::build_full_item_data( $item);
+                                        main_controller::$data = $res;
+                                    }
+                                    
+                                    if( $_SERVER['REQUEST_METHOD'] == GLOBAL_API_REQUEST_TYPE_DELETE)
+                                    {
+                                        self::$is_delete_item = true;
+                                        self::$current_screen = Model::GetObjectById( $item->model);
+                                        self::$current_item_id = $item_id;
+                                        self::$current_item = $item;
+                                        
+                                        self::delete_item_process();
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                //main_controller::set_system_msg( DATA_NOT_MATCH, SYSTEM_MSGs_ERROR_TYPE);
+                                main_controller::throw_args_request_error( 'item_id', DATA_NOT_MATCH);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        //main_controller::set_system_msg( PERMISSION_ERROR, SYSTEM_MSGs_ERROR_TYPE);
+                        main_controller::throw_permission_error();
+                    }
+                }
+                else
+                {
+                    //main_controller::set_system_msg( PERMISSION_ERROR, SYSTEM_MSGs_ERROR_TYPE);
+                    main_controller::throw_args_request_error('application_id', DATA_NOT_MATCH);
+                }
+            }
+            else
+            {
+                //main_controller::set_system_msg( DATA_NOT_MATCH, SYSTEM_MSGs_ERROR_TYPE);
+                main_controller::throw_args_request_error( null, DATA_NOT_MATCH);
+            }
+        }
+        else
+        {
+            //main_controller::set_system_msg( PERMISSION_ERROR, SYSTEM_MSGs_ERROR_TYPE);
+            main_controller::throw_permission_error();
+        }
+    }
+}
+?>
