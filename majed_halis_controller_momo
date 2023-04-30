@@ -1,5 +1,5 @@
 <?php
-class item_controller extends main_controller
+class majed_halis_controller_momo extends main_controller
 {
    public static $post_unique_fields_values = array();
     public static $current_time_field = null;
