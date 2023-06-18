@@ -1,17 +1,5 @@
-# physical
-Managing a physical therapy clinic
-# physical
-Managing a physical therapy clinic
-
-# physical
-Managing a physical therapy clinic
-
-# physical
-Managing a physical therapy clinic
-
-# physical
-Managing a physical therapy clinic
-
-# physical
-Managing a physical therapy clinic
-
+ module.exports = { mainurl: 'https://api.1daycloud.com/v3/ecommerce/1624;',
+Authorization: 'TOKEN',
+headers: {
+          Authorization:            'TOKEN',
+        },};
